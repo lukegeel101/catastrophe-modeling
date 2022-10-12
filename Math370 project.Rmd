@@ -1,6 +1,6 @@
 
 title: "MATH370_GP"
-author: "Patrick Marchand"
+author: "Luke Geel"
 date: "4/22/2022"
 output: pdf_document
 ---
