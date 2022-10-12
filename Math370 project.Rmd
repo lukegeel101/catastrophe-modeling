@@ -1,0 +1,90 @@
+
+title: "MATH370_GP"
+author: "Patrick Marchand"
+date: "4/22/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(dplyr)
+setwd("~/Desktop")
+storm <- read.csv("Storms.csv")
+Tornado <- read.csv("Tornado.csv")
+Rucc <- read.csv("ruc2013.csv")
+``` 
+
+```{r data cleaning}
+##Pull necessary data from Tornado
+Tornado <- select(Tornado, c('EVENT_ID', 'STATE_FIPS', 'CZ_FIPS', 'DAMAGE_PROPERTY', 'DAMAGE_CROPS', 'TOR_F_SCALE', 'TOR_LENGTH', 'TOR_WIDTH', 'EVENT_NARRATIVE'))
+
+##Pull necessary data from Rucc
+Rucc <- Rucc %>% select(c('FIPS', 'RUCC_2013'))
+
+##Reformat DAMAGE_PROPERTY to numeric values
+Tornado <- Tornado %>% mutate(DAMAGE_PROPERTY = sub("K","e3", DAMAGE_PROPERTY, fixed = TRUE))
+Tornado <- Tornado %>% mutate(DAMAGE_PROPERTY = sub("M","e6", DAMAGE_PROPERTY, fixed = TRUE))
+Tornado <- Tornado %>% mutate(DAMAGE_PROPERTY = sub("B","e9", DAMAGE_PROPERTY, fixed = TRUE))
+Tornado <- Tornado %>% mutate(DAMAGE_PROPERTY = as.numeric(DAMAGE_PROPERTY))
+Tornado <- Tornado %>% mutate(DAMAGE_PROPERTY = coalesce(DAMAGE_PROPERTY, 0))
+
+##Reformat DAMAGE_CROPS to numeric values
+Tornado <- Tornado %>% mutate(DAMAGE_CROPS = sub("K","e3", DAMAGE_CROPS, fixed = TRUE))
+Tornado <- Tornado %>% mutate(DAMAGE_CROPS = sub("M","e6", DAMAGE_CROPS, fixed = TRUE))
+Tornado <- Tornado %>% mutate(DAMAGE_CROPS = sub("B","e9", DAMAGE_CROPS, fixed = TRUE))
+Tornado <- Tornado %>% mutate(DAMAGE_CROPS = as.numeric(DAMAGE_CROPS))
+Tornado <- Tornado %>% mutate(DAMAGE_CROPS = coalesce(DAMAGE_CROPS, 0))
+
+##Standardize TOR_F_SCALE
+Tornado <- Tornado %>% mutate(TOR_F_SCALE = sub("E","", TOR_F_SCALE, fixed = TRUE))
+Tornado <- Tornado %>% mutate(TOR_F_SCALE = sub("F","", TOR_F_SCALE, fixed = TRUE))
+Tornado <- Tornado %>% mutate(TOR_F_SCALE = as.numeric(TOR_F_SCALE))
+
+## Generate standard FIPS, PATH_SIZE, and TOTAL_DAMAGE in Tornado
+Tornado <- Tornado %>% mutate(PATH_SIZE = ((5280 * TOR_LENGTH * TOR_WIDTH)^(1/2)))
+Tornado <- Tornado %>% mutate(TOTAL_DAMAGE = (DAMAGE_PROPERTY + DAMAGE_CROPS))
+Tornado <- Tornado %>% mutate(FIPS = STATE_FIPS * 1000 + CZ_FIPS)
+
+
+##Join Tables
+Tornado <- left_join(Tornado, Rucc, by = NULL, copy = TRUE)
+
+## Remove rows with Null RUCC 
+Tornado <- Tornado %>% mutate(RUCC_2013 = coalesce(RUCC_2013, 0))
+Tornado <- Tornado %>% filter(RUCC_2013 != 0)
+
+#log damage
+Tornado <- Tornado %>% mutate(log_DAMAGE = case_when(TOTAL_DAMAGE != 0 ~ log10(TOTAL_DAMAGE),
+                                                     TOTAL_DAMAGE == 0 ~ 0))
+Tornado <- Tornado %>% mutate(exp_F = 10^(TOR_F_SCALE))
+Tornado <- Tornado %>% mutate(exp_len = 10^(TOR_LENGTH))
+
+
+##Create variables for F-scale
+#for (i in 0:5) {
+  #Tornado <- Tornado %>% mutate(F_scale = case_when(TOR_F_SCALE == i ~ 1,
+ #                                                   TOR_F_SCALE != i ~ 0))
+  #names(Tornado)[names(Tornado) == "F_scale"] <- paste("Tornado_F", i, sep = "_")
+#}
+```
+
+```{r data analysis}
+damage_dist <- Tornado %>% ggplot(aes(x = TOTAL_DAMAGE)) + geom_histogram() + labs(x = "Damage of Tornado", y = "Amount of Tornados", title = "Tornados by Damage Caused")
+log_damage_dist <- Tornado %>% ggplot(aes(x = TOTAL_DAMAGE)) + geom_histogram() + labs(x = "Damage of Tornado", y = "Amount of Tornados", title = "Tornados by Damage Caused") +scale_x_continuous(trans = "log10")
+F_SCALE_plot <- Tornado %>% filter(TOTAL_DAMAGE != 0) %>% ggplot(aes( x = TOR_F_SCALE,  y = TOTAL_DAMAGE, group = TOR_F_SCALE)) + geom_boxplot() + labs(x = "F-Scale of Tornado", y = "Damage of Tornado", title = "Damage Caused by Tornados by F-Scale of Tornado") 
+RUCC_plot <- Tornado %>% filter(TOTAL_DAMAGE != 0) %>% ggplot(aes( x = RUCC_2013, y = TOTAL_DAMAGE, group = RUCC_2013)) + geom_boxplot() + scale_y_continuous(trans = "log10", ) + labs(x = "RUCC score", y = "Damage of Tornado", title = "Damage caused by tornados by RUCC") + scale_x_continuous(breaks = 1:9)
+PATH_SIZE_plot <- Tornado %>% filter( TOR_LENGTH < 200)%>% filter(TOTAL_DAMAGE != 0) %>% ggplot(aes( x =TOR_LENGTH,  y = TOTAL_DAMAGE)) + geom_point() + geom_smooth(method = "lm") + labs(x = "Length of Path (in miles)", y = "Damage of Tornado", title = "Damage Caused by Tornados by Length of Path") + scale_y_continuous(trans = "log10") + scale_x_continuous(trans = "log2")
+
+
+log_damage_dist
+damage_dist
+RUCC_plot
+F_SCALE_plot
+PATH_SIZE_plot
+```
+
+```{r data modeling}
+Tornado_fit <- Tornado %>% lm(formula = log_DAMAGE ~ TOR_F_SCALE + TOR_LENGTH + RUCC_2013)
+summary(Tornado_fit)
+```
